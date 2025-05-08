@@ -198,7 +198,9 @@ class Authenticator(BaseAuthenticator):
         from bottle import request
 
         try:
-            username, password = credentials.split(":", 1)
+            username, password_otp = credentials.split(":", 1)
+            # Split password and OTP token (assuming format "password:otp")
+            password, otp = password_otp.split(":", 1) if ":" in password_otp else (password_otp, None)
         except ValueError:
             raise YunohostError("invalid_credentials")
 
@@ -235,6 +237,20 @@ class Authenticator(BaseAuthenticator):
                     "Not logged with the appropriate identity ?!",
                     raw_msg=True,
                 )
+
+            # After successful password auth, check OTP if required
+            if otp:
+                # Get OTP config from user's LDAP entry
+                user_entry = _get_ldap_interface().search(
+                    "ou=users",
+                    f"uid={username}",
+                    attrs=["oathTOTPToken", "oathTOTPParams"]
+                )[0]
+                
+                # Verify OTP
+                if not self._verify_totp(otp, user_entry):
+                    raise YunohostError("invalid_otp")
+
         finally:
             # Free the connection, we don't really need it to keep it open as the point is only to check authentication...
             if con:
@@ -355,6 +371,21 @@ class Authenticator(BaseAuthenticator):
             )
 
         response.delete_cookie("yunohost.portal", path="/")
+
+    def _verify_totp(self, otp, user_entry):
+        import pyotp
+        token_entry = user_entry.get("oathTOTPToken", [""])[0]
+        params_entry = user_entry.get("oathTOTPParams", [""])[0]
+        
+        if not token_entry or not params_entry:
+            return True  # User not configured for OTP
+            
+        secret = token_entry.split(":")[1]
+        step = int(params_entry.split(":")[1])
+        digits = int(params_entry.split(":")[2])
+        
+        totp = pyotp.TOTP(secret, interval=step, digits=digits)
+        return totp.verify(otp)
 
     def purge_expired_session_files(self):
 

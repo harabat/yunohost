@@ -405,6 +405,8 @@ def user_update(
     from_import: bool = False,
     fullname: str | None = None,
     loginShell: str | None = None,
+    enable_2fa: bool = False,
+    disable_2fa: bool = False,
 ):
     if fullname and fullname.strip():
         fullname = fullname.strip()
@@ -570,6 +572,24 @@ def user_update(
             raise YunohostValidationError("invalid_shell", shell=loginShell)
         new_attr_dict["loginShell"] = loginShell
         env_dict["YNH_USER_LOGINSHELL"] = loginShell
+
+    if enable_2fa:
+        import pyotp
+        secret = pyotp.random_base32()
+        token = f"totp:{secret}"
+        params = f"totp:30:6"  # 30s step, 6 digits
+        
+        new_attr_dict.update({
+            "objectClass": ["oathTOTPUser"],
+            "oathTOTPToken": [token],
+            "oathTOTPParams": [params]
+        })
+        
+    if disable_2fa:
+        new_attr_dict.update({
+            "oathTOTPToken": [],
+            "oathTOTPParams": []
+        })
 
     if not from_import:
         operation_logger.start()
